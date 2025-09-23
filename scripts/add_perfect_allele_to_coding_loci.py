@@ -1,0 +1,1 @@
+../../scripts/add_perfect_allele_to_coding_loci.py
