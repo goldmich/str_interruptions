@@ -1,1 +1,504 @@
-../interruptions.snake
+"""
+Processing interruptions
+"""
+
+import glob
+
+# load config
+configfile: "interruptions_config.json"
+vcf_dir=config["vcf_dir"]
+ped_file=config["ped_file"]
+unrelated_samples=config["unrelated_samples"]
+vista_enhancers=config["vista_enhancers"]
+ad_gene_list=config["ad_gene_list"]
+analysis_dir=config["analysis_dir"]
+genehancer_file=config["genehancer_file"]
+gtf_file = config["gtf_file"]
+pfam_file = config["pfam_file"]
+ref_genome = config["ref_genome"]
+max_idr_chip_bed = config["max_idr_chip_bed"]
+cpgi_file = config["cpgi_file"]
+
+# specify default parameters
+params_default="--account=quinlan-rw --time=04:00:00 --ntasks=1 --partition=quinlan-shared-rw --mem 4096M -o slurm-%j.out -e slurm-%j.err"
+
+AUTOSOMES = ['chr' + str(x) for x in range(1, 23)]
+
+rule all:
+	input:
+		interruptions_af_homology = '%s/interruptions_full_annotations.txt' % analysis_dir,
+# 		gtf_exons_w_str_pfam = '%s/gtf_coding_exons_loj_str_pfam.bed' % analysis_dir,
+		coding_interruptions = '%s/coding_interruptions_full_annotations.txt' % analysis_dir,
+		gnomad_interruptions = '%s/gnomad_interruptions_af_coding.txt' % analysis_dir
+	params: sge_opts=params_default
+
+rule generate_related_samples_list:
+	input: 
+		unrelated = unrelated_samples,
+		ped = ped_file
+	output: '%s/related_1kgp_samples_to_exclude.txt' % analysis_dir
+	params: params_default
+	script: '%s/scripts/generate_related_samples_list.py' % analysis_dir
+	
+
+# --force-samples just allows us to indicate samples to exclude that are missing from the header
+rule filter_vcf_unrelated:
+	input: 
+		vcf='%s/ensemble_{chr}_filtered.vcf.gz' % vcf_dir,
+		sample_list='%s/related_1kgp_samples_to_exclude.txt' % analysis_dir
+	output: '%s/tmp/ensemble_{chr}_filtered.unrelated.vcf.gz' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+	module load bcftools/1.16
+	
+	bcftools view -S ^{input.sample_list} {input.vcf} -O z -o {output} --force-samples
+	bcftools index -t {output}
+	
+	"""
+
+rule generate_locus_characteristics:
+	input: '%s/tmp/ensemble_{chr}_filtered.unrelated.vcf.gz' % analysis_dir
+	output: af_homology_stats='%s/tmp/interruptions_af_homology.{chr}.txt' % analysis_dir,
+			allele_perfect_seq = '%s/tmp/allele_perfect_seq.{chr}.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/get_longest_homologous_sequence.py' % analysis_dir
+
+rule cat_locus_characteristics:
+	input: expand('%s/tmp/interruptions_af_homology.{chr}.txt' % analysis_dir, chr=AUTOSOMES)
+	output: '%s/tmp/interruptions_af_homology.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		awk '{{if ($1 !~ /^#/) print $0}}' {input} > {output}
+	"""
+
+# there are some repeated loci in the vcf i guess
+rule annotate_locus_characteristics_w_enhancer:
+	input: 
+		locus_characteristics='%s/tmp/interruptions_af_homology.txt' % analysis_dir,
+		vista_enhancers_file=vista_enhancers
+	output: '%s/tmp/interruptions_enhancers.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+	module load bedtools
+	
+	awk '{{if ($1 !~ /chrX/) print substr($1, 4) "\t" $2 "\t" $3}}' {input.vista_enhancers_file} | \
+	 sort -V -k1,1 -k2,2n | awk '{{print "chr" $0}}' | \
+	 bedtools intersect -a {input.locus_characteristics} -b stdin -c | \
+	 bedtools groupby -g 1-9 -c 10 -o max > {output}
+	
+	"""
+
+rule annotate_w_genehancer:
+	input: 
+		locus_characteristics='%s/tmp/interruptions_enhancers.txt' % analysis_dir,
+		genehancer=genehancer_file
+	output: '%s/tmp/interruptions_genehancers.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+	module load bedtools
+	
+	gunzip -c {input.genehancer} | awk '{{if ($1 ~ /[0-9]+/) print $0}}' | \
+	 sort -V -k1,1 -k2,2n | awk '{{print "chr" $1 "\t" $2 "\t" $3 "\t" $5 "\t" $6 "\t" $7}}' | \
+	 bedtools intersect -a {input.locus_characteristics} -b stdin -loj | \
+	 bedtools groupby -g 1-10 -c 14,15,16 -o distinct > {output}
+	
+	"""
+
+rule loeuf_table_transcipts:
+	input: '%s/supplementary_dataset_11_full_constraint_metrics.tsv.gz' % analysis_dir
+	output: '%s/tmp/loeuf_by_transcript.bed' % analysis_dir
+	params: sge_opts=params_default
+	shell:"""
+		gunzip -c {input} |
+		 awk -F "\t" '{{if ($32 ~ /^$/ && $1 !~ /gene/) print $76 "\t" $77 "\t" $78 "\t" $1 "\t" $2 "\t" $31}}' |
+		 sort -k1,1 -k2,2n > {output}
+	"""
+
+rule annotate_w_loeuf_and_ad_genes:
+	input: loeuf = '%s/tmp/loeuf_by_transcript.bed' % analysis_dir,
+		   ad_gene_list = ad_gene_list,
+		   locus_characteristics = '%s/tmp/interruptions_genehancers.txt' % analysis_dir
+	output: '%s/tmp/interruptions_loeuf.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/get_loeuf_and_ad_genes_for_genehancer_hits.py' % analysis_dir
+
+rule process_gtf_to_bed:
+	input: gtf_file
+	output: '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/process_gtf_annotation.py' % analysis_dir
+	
+
+# culling some columns
+# the vcf seems 1-indexed but end coord is not inclusive so i'm adding 1 to end coordinate in the gtf file
+# i don't need the rest of the gtf columns for now; can add those back to the coding loci later when i analyze them
+rule annotate_coding:
+	input: 
+		gtf_bed = '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_loeuf.txt' % analysis_dir
+	output: '%s/tmp/interruptions_coding.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		
+		module load bedtools
+		bedtools merge -i {input.gtf_bed} -c 4,5 -o distinct |
+		 awk '{{print $1 "\t" $2 "\t" $3 + 1 "\t" $4 "\t" $5}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -f 1 -loj |
+		 bedtools groupby -g 1-14 -c 18,19 -o distinct,distinct > {output}
+	
+	"""
+
+# some genes cannot be found in the consolidated loeuf table bc they have flags in $32
+rule coding_loeuf:
+	input: loeuf = '%s/tmp/loeuf_by_transcript.bed' % analysis_dir,
+		   ad_gene_list = ad_gene_list,
+		   locus_characteristics = '%s/tmp/interruptions_coding.txt' % analysis_dir
+	output: '%s/tmp/interruptions_constraint.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/get_loeuf_and_ad_genes_for_coding_strs.py' % analysis_dir
+
+rule annotate_coding_interruptions:
+	input: 
+		locus_characteristics = '%s/tmp/interruptions_constraint.txt' % analysis_dir,
+		gtf_bed = '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir,
+		ref_genome = ref_genome
+	output: '%s/tmp/coding_interruptions_manual_annotations.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/annotate_coding_interruptions.py' % analysis_dir
+
+# rule annotate_coding_interruptions_old_syntax:
+# 	input: 
+# 		locus_characteristics = '%s/tmp/interruptions_af_homology_enhancers_genehancers_loeuf_coding_constraint.txt' % analysis_dir,
+# 		gtf_bed = '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir,
+# 		ref_genome = ref_genome
+# 	output: '%s/tmp/coding_interruptions_af_homology_enhancers_genehancers_loeuf_coding_constraint_manual_annotations.old_syntax.txt' % analysis_dir
+# 	params: sge_opts=params_default
+# 	script: '%s/scripts/annotate_coding_interruptions.py' % analysis_dir
+# 	
+# rule annotate_coding_interruptions_new_syntax_old_file:
+# 	input: 
+# 		locus_characteristics = '%s/tmp/interruptions_constraint.copied_from_old.txt' % analysis_dir,
+# 		gtf_bed = '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir,
+# 		ref_genome = ref_genome
+# 	output: '%s/tmp/coding_interruptions_manual_annotations.new_syntax_old_file.txt' % analysis_dir
+# 	params: sge_opts=params_default
+# 	script: '%s/scripts/annotate_coding_interruptions.py' % analysis_dir
+
+# subset loci to coding overlap
+# merge loci to avoid issues w multiple alleles?
+# subset chr vcf
+# add perfect repeat in phase? (this will be done in separate script)
+# run vep, parse output
+rule get_coding_loci_chr:
+	input: 
+		locus_characteristics = '%s/tmp/coding_interruptions_manual_annotations.txt' % analysis_dir,
+		vcf='%s/ensemble_{chr}_filtered.vcf.gz' % vcf_dir
+	output: '%s/tmp/coding_loci.{chr}.bcf.gz' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+		module load bedtools
+		module load bcftools/1.16
+		awk '{{if ($15 !~ /\./ && $1 ~ /{wildcards.chr}$/) print $1 "\t" $2 "\t" $3 }}' {input.locus_characteristics} | \
+			bedtools merge -i stdin > ./tmp/coding_loci.{wildcards.chr}.txt
+		
+		bcftools view -R ./tmp/coding_loci.{wildcards.chr}.txt -O b {input.vcf} > {output}
+		rm ./tmp/coding_loci.{wildcards.chr}.txt
+	
+	"""
+
+rule add_perfect_allele_to_coding_loci:
+	input: '%s/tmp/coding_loci.{chr}.bcf.gz' % analysis_dir
+	output: '%s/tmp/coding_loci_w_perfect_repeat.{chr}.bcf.gz' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/add_perfect_allele_to_coding_loci.py' % analysis_dir
+
+rule run_vep_coding_loci:
+	input: '%s/tmp/coding_loci_w_perfect_repeat.{chr}.bcf.gz' % analysis_dir
+	output: '%s/tmp/coding_loci_w_perfect_repeat_annotations.{chr}.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+		module load vep/104.2
+	
+		vep --cache --dir_cache /scratch/ucgd/lustre/common/data/vep_cache \
+		 --fasta /scratch/ucgd/lustre/common/data/Reference/GRCh38/human_g1k_v38_decoy_phix.fasta \
+		 --input_file {input} --output_file {output} --everything --force_overwrite
+	
+	"""
+
+rule interpret_vep:
+	input: '%s/tmp/coding_loci_w_perfect_repeat_annotations.{chr}.txt' % analysis_dir,
+	output: '%s/tmp/coding_loci_annotated.{chr}.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/interpret_vep.py' % analysis_dir
+
+rule sum_vep_interpretations:
+	input: expand('%s/tmp/coding_loci_annotated.{chr}.txt' % analysis_dir, chr = AUTOSOMES)
+	output: '%s/tmp/coding_loci_annotated.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+	
+	cat {input} > {output}
+	
+	"""
+
+rule add_annotation_to_coding_loci:
+	input:
+		coding_annotations = '%s/tmp/coding_loci_annotated.txt' % analysis_dir,
+		coding_locus_characteristics = '%s/tmp/coding_interruptions_manual_annotations.txt' % analysis_dir
+	output: '%s/tmp/coding_interruptions_vep.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/add_vep_annotation_to_coding_loci.py' % analysis_dir
+
+# eventually i will port over all the gnomad analysis from the harris servers but today is not that day
+# for now i just want to exclude sites that are overlapping coding regions at all, not worried about partial vs full overlap
+rule gnomad_interruptions_annotate_coding:
+	input: 
+		gtf_bed = '%s/tmp/gtf_coding_exons.hg38.bed' % analysis_dir,
+		gnomad_loci = '%s/gnomad_interruptions_af.txt' % analysis_dir
+	output: '%s/gnomad_interruptions_af_coding.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		
+		module load bedtools
+		
+		awk '{{print $1 "\t" $2 "\t" $3 * length($4) + $2 "\t" $3 "\t" $4 "\t" $5  "\t" $6  "\t" $7}}' {input.gnomad_loci} > tmp/gnomad_interruptions_af.bed
+		
+		bedtools merge -i {input.gtf_bed} -c 4,5 -o distinct |
+		 bedtools intersect -a tmp/gnomad_interruptions_af.bed -b stdin -loj |
+		 bedtools groupby -g 1-8 -c 9,10 -o distinct,distinct > {output}
+		
+		rm tmp/gnomad_interruptions_af.bed
+	
+	"""
+
+rule process_pfam_bed:
+	input: pfam_file
+	output: '%s/tmp/pfam.gencode.grch38.single_line.bed' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/process_pfam_bed.py' % analysis_dir
+	
+# pfam is 0-indexed
+# The vcf is 1-indexed but the end coordinate is not inclusive!
+# This is unlike the gtf file above where it is 1-indexed and both ends are inclusive
+# check to make sure that I didn't get rid of the wrong columns
+rule intersect_pfam:
+	input:
+		pfam_bed = '%s/tmp/pfam.gencode.grch38.single_line.bed' % analysis_dir,
+		coding_locus_characteristics = '%s/tmp/coding_interruptions_vep.txt' % analysis_dir
+	output: '%s/coding_interruptions_full_annotations.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		module load bedtools
+		
+		awk '{{print $1 "\t" $2 + 1 "\t" $3 + 1 "\t" $4}}' {input.pfam_bed} | \
+		 bedtools intersect -a {input.coding_locus_characteristics} -b stdin -f 1 -loj | \
+		 bedtools groupby -g 1-24 -c 28 -o distinct | \
+		 cut --complement -f5 > {output}
+	
+	"""
+
+# you'll need to keep track of the order of the TF columns - worthwhile just printing them as a list
+# probably want the -C option but would be nice to slim columns and/or rows down a bit before heading into R
+rule intersect_tf_chip:
+	input:
+		locus_characteristics = '%s/tmp/interruptions_constraint.txt' % analysis_dir,
+		tf_chip_list = glob.glob("%s/tf_chip_idr_peaks/*.bed.gz" % analysis_dir)
+	output: '%s/tmp/interruptions_tf_chip_long.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		bedtools intersect -a {input.locus_characteristics} -b {input.tf_chip_list} -C -filenames > {output}
+			
+	"""	
+
+rule collapse_tf_chip_output:
+	input:
+		locus_characteristics = '%s/tmp/interruptions_tf_chip_long.txt' % analysis_dir,
+		tf_chip_table = glob.glob("%s/tf_chip_idr_peaks/tf_chip_idr_encode_accessions.csv" % analysis_dir)
+	output: '%s/tmp/interruptions_tf_chip.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/collapse_tf_chip_intersect.py' % analysis_dir
+
+# cpgi is 0-indexed, just add 1 to start position
+rule intersect_cpgi:
+	input:
+		locus_characteristics = '%s/tmp/interruptions_tf_chip.txt' % analysis_dir,
+		cpgi_file = cpgi_file
+	output: '%s/tmp/interruptions_cpgi.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		awk '{{if ($1 !~ /^#/) print $2 "\t" $3 + 1 "\t" $4}}' {input.cpgi_file} |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -c > {output}
+			
+	"""	
+
+rule intersect_fire_peaks:
+	input:
+		k562_wide_peaks = '%s/K562.FDR-wide-peaks.bed.gz' % analysis_dir,
+		gm12878_wide_peaks = '%s/GM12878.FDR-wide-peaks.bed.gz' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_cpgi.txt' % analysis_dir
+	output: '%s/tmp/interruptions_fire.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		bedtools intersect -a {input.k562_wide_peaks} -b {input.gm12878_wide_peaks} |
+		 awk '{{print $1 "\t" $2 + 1 "\t" $3}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -c > {output}
+		 	
+	"""
+
+rule intersect_ipsc_chip:
+	input:
+		ipsc_atac_peaks = '%s/ENCFF321VDH.bed.gz' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_fire.txt' % analysis_dir
+	output: '%s/tmp/interruptions_ipsc.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		gunzip -c {input.ipsc_atac_peaks} |
+		 awk '{{print $1 "\t" $2 + 1 "\t" $3}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -c > {output}
+	
+	"""
+
+rule intersect_k562_gm12878_chip:
+	input:
+		k562_atac_peaks = '%s/ENCFF333TAT.bed.gz' % analysis_dir,
+		gm12878_atac_peaks = '%s/ENCFF748UZH.bed.gz' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_ipsc.txt' % analysis_dir
+	output: '%s/tmp/interruptions_atac.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		bedtools intersect -a {input.k562_atac_peaks} -b {input.gm12878_atac_peaks} |
+		 awk '{{print $1 "\t" $2 + 1 "\t" $3}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -c > {output}
+	
+	"""
+
+rule intersect_problematic_regions:
+	input:
+		problematic_regions = '%s/ENCFF356LFX.bed.gz' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_atac.txt' % analysis_dir
+	output: '%s/tmp/interruptions_problematic.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		gunzip -c {input.problematic_regions} |
+		 awk '{{print $1 "\t" $2 + 1 "\t" $3}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -c > {output}
+	
+	"""
+
+rule intersect_vista_enhancers:
+	input: 
+		vista_bed = '%s/vistaEnhancers.bed' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_problematic.txt' % analysis_dir
+	output: '%s/tmp/interruptions_vista.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		awk '{{print $1 "\t" $2 + 1 "\t" $3 "\t" $10}}' {input.vista_bed} |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -loj |
+		 bedtools groupby -g 1-24 -c 28 -o distinct > {output}
+			
+	"""
+
+rule intersect_chromhmm:
+	input: 
+		chromhmm_bed = '%s/E002_25_imputed12marks_hg38lift_segments.bed.gz' % analysis_dir,
+		locus_characteristics = '%s/tmp/interruptions_vista.txt' % analysis_dir
+	output: '%s/tmp/interruptions_chromhmm.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		gunzip -c {input.chromhmm_bed} |
+		awk '{{print $1 "\t" $2 + 1 "\t" $3 "\t" $4}}' |
+		 bedtools intersect -a {input.locus_characteristics} -b stdin -loj |
+		 bedtools groupby -g 1-25 -c 29 -o distinct > {output}
+			
+	"""
+
+rule parse_chromhmm:
+	input: '%s/tmp/interruptions_chromhmm.txt' % analysis_dir
+	output: '%s/tmp/interruptions_chromhmm_parsed.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/parse_chromhmm_states.py' % analysis_dir
+
+rule create_fasta_for_nbmst:
+	input: 
+		allele_perfect_seq = '%s/tmp/allele_perfect_seq.{chr}.txt' % analysis_dir,
+		ref_genome = ref_genome
+	output: '%s/tmp/allele_perfect_seq.{chr}.fa' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/create_allele_fasta_for_nbmst.py' % analysis_dir
+
+rule run_nbmst:
+	input: '%s/tmp/allele_perfect_seq.{chr}.fa' % analysis_dir
+	output: '%s/tmp/allele_perfect_seq.{chr}.motif_GQ.gff' % analysis_dir
+# 	wildcard_constraints: motif = "[A-Za-z]+"
+	params: sge_opts=params_default, analysis_dir=analysis_dir
+	shell: """
+	
+		{params.analysis_dir}/non-B_gfa/gfa -seq {input} -chrom {wildcards.chr} -out {params.analysis_dir}/tmp/allele_perfect_seq.{wildcards.chr}.motif -skipSTR -skipWGET
+		
+		"""
+
+MOTIFS = ['APR', 'Z', 'MR', 'IR', 'GQ', 'DR'] # ignoring STR
+rule clean_up_nbmst_filenames:
+	input: '%s/tmp/allele_perfect_seq.{chr}.motif_GQ.gff' % analysis_dir
+	output: expand('%s/tmp/allele_perfect_seq.{{chr}}.motif_{motif}.tsv' % analysis_dir, motif = MOTIFS)
+	params: sge_opts=params_default, analysis_dir=analysis_dir
+	shell: """
+	
+		for file in {params.analysis_dir}/tmp/allele_perfect_seq.{wildcards.chr}.motif*tsv; do
+		 clean=$(printf '%s\n' "$file" | grep -Po '(.*motif)')
+		 clean2=$(printf '%s\n' "$file" | grep -Po '(\\_[A-Z]+\\.[a-z]+$)')
+		 new="${{clean}}${{clean2}}"
+		 if [[ "$file" != "$new" ]]; then
+		 	cp $file $new
+		 fi
+		done
+	
+	"""
+
+# the escape characters might be wrong above (\_ and \.)
+
+rule parse_nbmst:
+	input: 
+		motif_files = expand('%s/tmp/allele_perfect_seq.{{chr}}.motif_{motif}.tsv' % analysis_dir, motif = MOTIFS),
+		fasta_file = '%s/tmp/allele_perfect_seq.{chr}.fa' % analysis_dir,
+		allele_perfect_seq = '%s/tmp/allele_perfect_seq.{chr}.txt' % analysis_dir
+	output: '%s/tmp/major_alleles_shapes.{chr}.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/parse_nbmst.py' % analysis_dir
+
+rule combine_major_allele_shapes:
+	input: expand('%s/tmp/major_alleles_shapes.{chr}.txt' % analysis_dir, chr = AUTOSOMES)
+	output: '%s/major_alleles_shapes.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell:"""
+	
+	awk '{{if ($1 !~ /#/) print $0}}' {input} > {output}
+	
+	"""
+
+
+# i'm likely to need allele if i add on future columns; this rule can just get cut
+rule remove_allele_seq:
+	input: '%s/tmp/interruptions_chromhmm_parsed.txt' % analysis_dir
+	output: '%s/interruptions_full_annotations.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: 	"""
+		
+		 cut --complement -f5 {input} > {output}
+	
+	"""
+

@@ -1,1 +1,14 @@
-../interruptions_config.json
+{
+  "vcf_dir": "/scratch/ucgd/lustre-labs/quinlan/data-shared/datasets/str_1kgp_h3a",
+  "ped_file": "/scratch/ucgd/lustre-labs/quinlan/data-shared/datasets/str_1kgp_h3a/integrated_call_samples_v3.20200731.ALL.ped",
+  "analysis_dir": "/scratch/ucgd/lustre-labs/quinlan/u6045601/interruptions",
+  "ad_gene_list": "/scratch/ucgd/lustre-labs/quinlan/u6045601/interruptions/berg_autosomal_dominant_genes.txt",
+  "vista_enhancers": "/scratch/ucgd/lustre-labs/quinlan/data-shared/constraint-tools/vista-elements/vista-elements.positive.hg38.hg19.tsv",
+  "genehancer_file": "/scratch/ucgd/lustre-labs/quinlan/u0055382/genome_reference/genehancer/genehancer_GRCh38.bed.gz",
+  "gtf_file": "/scratch/ucgd/lustre-labs/quinlan/data-shared/annotations/RefSeq/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz",
+  "pfam_file": "/scratch/ucgd/lustre-labs/quinlan/u6045601/interruptions/pfam.gencode.grch38.bed",
+  "ref_genome": "/scratch/ucgd/lustre/common/data/Reference/GRCh38/human_g1k_v38_decoy_phix.fasta",
+  "max_idr_chip_bed": "/scratch/ucgd/lustre-labs/quinlan/u6045601/interruptions/ENCFF123NLG.bed",
+  "cpgi_file": "/scratch/ucgd/lustre-labs/quinlan/u6045601/interruptions/cpgi_unmasked.grch38.txt",
+  "unrelated_samples": "/scratch/ucgd/lustre-labs/quinlan/data-shared/datasets/str_1kgp_h3a/1000G_2504_high_coverage.sequence.index.txt"
+}
