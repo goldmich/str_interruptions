@@ -1,0 +1,1 @@
+../../scripts/get_loeuf_and_ad_genes_for_coding_strs.py

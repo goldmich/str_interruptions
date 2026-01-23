@@ -1,0 +1,1 @@
+../../scripts/add_vep_annotation_to_coding_loci.py
