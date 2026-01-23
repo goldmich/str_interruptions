@@ -1,0 +1,1 @@
+../../scripts/get_longest_homologous_sequence.py
