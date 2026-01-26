@@ -1,0 +1,7 @@
+name: snakemake_202509
+channels:
+  - conda-forge
+  - bioconda
+  - r
+  - defaults
+prefix: /uufs/chpc.utah.edu/common/HIPAA/u6045601/.conda/envs/snakemake_202509
