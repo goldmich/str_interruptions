@@ -1,0 +1,83 @@
+"""
+Distribution of allele # x repeat units for SSC
+"""
+
+# load config
+configfile: "interruptions_config.json"
+analysis_dir=config["interruptions_dir"]
+vcf_dir=config["vcf_dir"]
+gnomad_dir=config["gnomad_dir"]
+onekgp_dir=config["onekgp_dir"]
+
+# specify default parameters
+params_default="-P sage -l mfree=4G,h_rt=4:00:00"
+
+AUTOSOMES = [str(x) for x in range(1, 23)]
+
+rule all:
+	input: 
+		gnomad_interruptions_af='%s/gnomad_interruptions_af.txt' % analysis_dir,
+		sistr_w_loeuf='%s/SSC_scores_w_loeuf.bed' % analysis_dir
+	params: sge_opts=params_default
+
+rule gnomad_interruptions_by_chr:
+	input: str_vcf = '%s/phase3_1_{chr}.sorted.vcf.gz' % vcf_dir,
+			gnomad_vcf = '%s/gnomad.{chr}.vcf.bgz' % gnomad_dir
+	output: '%s/tmp/chr{chr}.gnomad_interruptions_af.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/gnomad_interruptions.py' % analysis_dir
+
+rule cat_gnomad_interruptions:
+	input: expand('%s/tmp/chr{chr}.gnomad_interruptions_af.txt' % analysis_dir, chr=AUTOSOMES)
+	output: '%s/gnomad_interruptions_af.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		awk '{{if ($1 !~ /^#/) print $0}}' {input} > {output}
+	"""
+
+rule onekgp_interruptions_by_chr:
+	input: str_vcf = '%s/phase3_1_{chr}.sorted.vcf.gz' % vcf_dir,
+		   onekgp_vcf = '%s/ALL.chr{chr}.phase3_shapeit2_mvncall_integrated_v5.20130502.genotypes.bcf' % onekgp_dir
+	output: '%s/tmp/chr{chr}.onekgp_interruptions_af.txt' % analysis_dir
+	params: sge_opts=params_default
+	script: '%s/scripts/onekgp_interruptions.py' % analysis_dir
+	
+rule cat_onekgp_interruptions:
+	input: expand('%s/tmp/chr{chr}.onekgp_interruptions_af.txt' % analysis_dir, chr=AUTOSOMES)
+	output: '%s/onekgp_interruptions_af.txt' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		awk '{{if ($1 !~ /^#/) print $0}}' {input} > {output}
+	"""
+
+rule loeuf_table_transcipts:
+	input: '%s/supplementary_dataset_11_full_constraint_metrics.tsv.gz' % analysis_dir
+	output: '%s/tmp/loeuf_by_transcript.bed' % analysis_dir
+	params: sge_opts=params_default
+	shell:"""
+		gunzip -c {input} |
+		 awk -F "\t" '{{if ($32 ~ /^$/ && $1 !~ /gene/) print $76 "\t" $77 "\t" $78 "\t" $1 "\t" $2 "\t" $31}}' |
+		 sort -k1,1 -k2,2n > {output}
+	"""
+
+rule annotate_sistr_w_loeuf:
+	input: loeuf = '%s/tmp/loeuf_by_transcript.bed' % analysis_dir,
+		   sistr_table = '%s/SSC_scores.txt' % analysis_dir
+	output: '%s/SSC_scores_w_loeuf.bed' % analysis_dir
+	params: sge_opts=params_default
+	shell: """
+		
+		awk '{{if ($1 !~ /chrom/) print $0}}' {input.sistr_table} |
+		 sort -k1,1 -k2,2n > tmp/SSC_scores.sorted.bed
+		
+		bedtools closest -a tmp/SSC_scores.sorted.bed -b {input.loeuf} -t all -d |
+		 bedtools groupby -i stdin -g 1-15,22 -c 21 -o min > {output}
+		
+		rm tmp/SSC_scores.sorted.bed
+		
+	"""	
+
+#  		bedtools merge -c 6,4,5 -o min,distinct,distinct -i {input.loeuf}  |
+#  		 bedtools closest -a tmp/SSC_scores.sorted.bed -b stdin > {output}
+ 		
+
