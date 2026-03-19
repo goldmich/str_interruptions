@@ -1,4 +1,4 @@
-# Beginning to analyze the Jam et al. 1kgp & h3a data
+# Analyzing the Jam et al. 1kgp & h3a data
 
 library(ggplot2)
 library(dplyr)
@@ -93,21 +93,24 @@ jam_genotypes_enhancers <- subset(
 # What do these noncoding loci look like?
 library(ggridges)
 ggsave(
-  "./figures/purity_by_ru_length_all_noncoding_jam_20241206.pdf",
+  "./figures/purity_by_ru_length_all_noncoding_jam_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & !overlap_coding),
+      filter(., maf == max(maf) & !overlap_coding) %>%
+      slice(1L),
     aes(x = (levenshtein_distance / len))
   ) +
     geom_density(adjust = 5, fill = "gray") +
     theme_minimal() +
-    facet_grid(rows = vars(nchar(ru)))
+    facet_grid(rows = vars(nchar(ru))),
+  width = 6, height = 6
 )
 
 jam_genotypes_enhancers %>%
   group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
   filter(., maf == max(maf) & !overlap_coding) %>%
+  slice(1L) %>%
   mutate(., interrupted = levenshtein_distance > 0) %>%
   group_by(., interrupted) %>%
   count(.)
@@ -116,6 +119,7 @@ jam_genotypes_enhancers %>%
 jam_genotypes_enhancers %>%
   group_by(., chrom, start, end, ru, fraction_gc) %>%
   filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
+  slice(1L) %>%
   group_by(., chromhmm_state) %>%
   count(.)
 
@@ -125,6 +129,7 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "het")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state_factor = as.factor(chromhmm_state)),
     family = poisson(link = "log")
   )
@@ -143,13 +148,14 @@ summary(
 )
 # plotting this
 ggsave(
-  "./figures/noncoding_chromhmm_enh_vs_het_20250501.pdf",
+  "./figures/noncoding_chromhmm_enh_vs_het_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 &
                !overlap_coding & !is.na(chromhmm_state) &
                chromhmm_state %in% c("enh_str", "enh_wk", "het")) %>%
+      slice(1L) %>%
       mutate(., is_enhancer = chromhmm_state != "het") %>%
       group_by(., is_enhancer) %>%
       slice_sample(., n = 25000),
@@ -165,19 +171,21 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk", "het")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state = ifelse(chromhmm_state == "het", "het", "enh"),
              is_pure = levenshtein_distance == 0),
     family = binomial()
   )
 )
 
-# longest pure stretch?
+# # longest pure stretch?
 summary(
   glm(
     longest_pure_stretch ~ nchar(ru) + fraction_gc + chromhmm_state + offset(log(len)),
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk", "het")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state = ifelse(chromhmm_state == "het", "het", "enh"),
              longest_pure_stretch = nchar(ru) * max_homo_ru),
     family = poisson(link = "log")
@@ -191,6 +199,7 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk", "het")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state = ifelse(chromhmm_state == "het", "het", "enh"),
              longest_pure_stretch = nchar(ru) * max_homo_ru),
     family = poisson(link = "log")
@@ -204,6 +213,7 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state_factor = as.factor(chromhmm_state)),
     family = poisson(link = "log")
   )
@@ -211,13 +221,14 @@ summary(
 
 # Plotting this one
 ggsave(
-  "./figures/noncoding_chromhmm_enh_str_vs_enh_wk_20250501.pdf",
+  "./figures/noncoding_chromhmm_enh_str_vs_enh_wk_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 &
                !overlap_coding & !is.na(chromhmm_state) &
                chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+      slice(1L) %>%
       group_by(., chromhmm_state) %>%
       slice_sample(., n = 2500),
     aes(x = levenshtein_distance / len)
@@ -226,17 +237,17 @@ ggsave(
     theme_minimal()
 )
 
-ggsave(
-  "./figures/noncoding_chromhmm_states_20250411.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & !is.na(chromhmm_state)) %>%
-      mutate(., chromhmm_state_factor = as.factor(chromhmm_state)),
-    aes(x = chromhmm_state_factor, y = levenshtein_distance / len)
-  ) +
-    geom_boxplot()
-)
+# ggsave(
+#   "./figures/noncoding_chromhmm_states_20250411.pdf",
+#   ggplot(
+#     data = jam_genotypes_enhancers %>%
+#       group_by(., chrom, start, end, ru, fraction_gc) %>%
+#       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & !is.na(chromhmm_state)) %>%
+#       mutate(., chromhmm_state_factor = as.factor(chromhmm_state)),
+#     aes(x = chromhmm_state_factor, y = levenshtein_distance / len)
+#   ) +
+#     geom_boxplot()
+# )
 
 # downsampling to the smallest n (strong enhancers)
 ggsave(
@@ -247,6 +258,7 @@ ggsave(
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 &
                !overlap_coding & !is.na(chromhmm_state) &
                chromhmm_state %in% c("enh_str", "enh_wk", "het")) %>%
+      slice(1L) %>%
       mutate(., chromhmm_state_factor = as.factor(chromhmm_state)) %>%
       group_by(., chromhmm_state_factor) %>%
       slice_sample(., n = 2500),
@@ -262,17 +274,19 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_wk", "enh_str")) %>%
+      slice(1L) %>%
       mutate(., in_ipsc_peak = ipsc_atac > 0),
     family = poisson(link = "log")
   )
 )
 
 ggsave(
-  "./figures/noncoding_ipsc_peaks_in_chromhmm_enh_20250501.pdf",
+  "./figures/noncoding_ipsc_peaks_in_chromhmm_enh_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+      slice(1L) %>%
       mutate(., in_ipsc_peak = ipsc_atac > 0) %>%
       group_by(., in_ipsc_peak) %>%
       slice_sample(., n = 6250),
@@ -284,17 +298,20 @@ ggsave(
 
 # promoters are purer
 ggsave(
-  "./figures/noncoding_enh_vs_prom_chromhmm_20250424.pdf",
+  "./figures/noncoding_enh_vs_prom_chromhmm_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk", "prom")) %>%
+      slice(1L) %>%
       mutate(., is_promoter = chromhmm_state == "prom") %>%
       group_by(., is_promoter) %>%
       slice_sample(., n = 2748),
     aes(x = levenshtein_distance / len)
   ) +
-    geom_density(aes(color = is_promoter), adjust = 3)
+    geom_density(aes(color = is_promoter), adjust = 3) +
+    theme_minimal(),
+  width = 6, height = 6
 )
 
 summary(
@@ -303,6 +320,7 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk", "prom")) %>%
+      slice(1L) %>%
       mutate(., is_promoter = chromhmm_state == "prom"),
     family = poisson(link = "log")
   )
@@ -315,34 +333,36 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_wk", "enh_str")) %>%
+      slice(1L) %>%
       mutate(., in_fire_peak = fire > 0),
     family = poisson(link = "log")
   )
 )
 
-# in atac peak
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_atac_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
-      mutate(., in_atac_peak = k562_gm12878_atac > 0),
-    family = poisson(link = "log")
-  )
-)
+# in atac peak GM12878 & K562, same as fire
+# summary(
+#   glm(
+#     levenshtein_distance ~ nchar(ru) + fraction_gc + in_atac_peak + offset(log(len)),
+#     data = jam_genotypes_enhancers %>%
+#       group_by(., chrom, start, end, ru, fraction_gc) %>%
+#       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+#       slice(1L) %>%
+#       mutate(., in_atac_peak = k562_gm12878_atac > 0),
+#     family = poisson(link = "log")
+#   )
+# )
 
 # in vista
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_vista + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_wk", "enh_str")) %>%
-      mutate(., in_vista = in_vista > 0),
-    family = poisson(link = "log")
-  )
-) # no effect
+# summary(
+#   glm(
+#     levenshtein_distance ~ nchar(ru) + fraction_gc + in_vista + offset(log(len)),
+#     data = jam_genotypes_enhancers %>%
+#       group_by(., chrom, start, end, ru, fraction_gc) %>%
+#       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & chromhmm_state %in% c("enh_wk", "enh_str")) %>%
+#       mutate(., in_vista = in_vista > 0),
+#     family = poisson(link = "log")
+#   )
+# ) # no effect
 
 # testing the specific DNA binding proteins
 sapply(
@@ -355,6 +375,7 @@ sapply(
           group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
           filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
                    !overlap_coding & ru %in% c("AG", "AC") & grepl(x, overlap_tf_chip) & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+          slice(1L) %>%
           mutate(., ru = as.factor(ru)),
         family = poisson(link = "log")
       )
@@ -364,12 +385,13 @@ sapply(
 
 library(tidyr)
 ggsave(
-  "./figures/tf_chip_overlap_purity_ag_ac_20250501.pdf",
+  "./figures/tf_chip_overlap_purity_ag_ac_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
                !overlap_coding & ru %in% c("AG", "AC") & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+      slice(1L) %>%
       mutate(., ru = as.factor(ru),
              BRCA1 = grepl("BRCA1", overlap_tf_chip),
              CTCF = grepl("CTCF", overlap_tf_chip),
@@ -390,27 +412,6 @@ ggsave(
     theme_minimal()
 )
 
-# what are the properties of AG vs AC?
-sapply(
-  tf_list,
-  function(x)
-    print(
-      summary(
-        glm(
-          levenshtein_distance ~ ru * in_tf_binding_site + offset(log(len)),
-          data = jam_genotypes_enhancers %>%
-            group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
-            filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
-                     !overlap_coding & ru %in% c("AG", "AC")) %>%
-            mutate(., ru = as.factor(ru), 
-                   in_tf_binding_site = grepl(x, overlap_tf_chip) & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
-            filter(., in_tf_binding_site | !chromhmm_state %in% c("enh_str", "enh_wk")),
-          family = poisson(link = "log")
-        )
-      )
-    )
-)
-
 # Specifically correcting for AG mutability
 summary(
   glm(
@@ -419,6 +420,7 @@ summary(
       group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
                !overlap_coding & ru %in% c("AG", "AC") & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
+      slice(1L) %>%
       mutate(., ru = as.factor(ru)),
     family = poisson(link = "log")
   )
@@ -433,9 +435,10 @@ sapply(
           levenshtein_distance ~ ru * in_tf_binding_site + offset(log(len)),
           data = jam_genotypes_enhancers %>%
             group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
-            filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
+            filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 &
                      !overlap_coding & ru %in% c("AG", "AC") & chromhmm_state %in% c("enh_str", "enh_wk")) %>%
-            mutate(., ru = as.factor(ru), 
+            slice(1L) %>%
+            mutate(., ru = as.factor(ru),
                    in_tf_binding_site = grepl(x, overlap_tf_chip)),
           family = poisson(link = "log")
         )
@@ -443,32 +446,9 @@ sapply(
     )
 )
 
-# Revcomp/cycle motifs as necessary
-# AG are favored, AC are disfavored
-sapply(
-  tf_list,
-  function(x)
-    print(summary(
-      glm(
-        levenshtein_distance ~ ru + offset(log(len)),
-        data = jam_genotypes_enhancers %>%
-          group_by(., chrom, start, end, ru, fraction_gc, overlap_tf_chip) %>%
-          filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
-                   !overlap_coding & ru %in% c("AG", "AC") & grepl(x, overlap_tf_chip)) %>%
-          mutate(., ru = as.factor(ru)),
-        family = poisson(link = "log")
-      )
-    ))
-)
 
 
 ######## Replicating now in genehancer
-
-# nrow(
-#   jam_genotypes_enhancers %>%
-#     group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-#     filter(., maf == max(maf) & !overlap_coding)
-#   )
 
 summary(
   glm(
@@ -476,16 +456,18 @@ summary(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & 
-               !overlap_coding),
+               !overlap_coding) %>%
+      slice(1L),
     family = poisson(link = "log")
   )
 )
 ggsave(
-  "./figures/noncoding_purity_by_genehancer_20250502.pdf",
+  "./figures/noncoding_purity_by_genehancer_20260316.pdf",
   ggplot(
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
       filter(., maf == max(maf) & !overlap_coding) %>%
+      slice(1L) %>%
       group_by(., in_genehancer) %>%
       slice_sample(., n = 125000),
     aes(x = (levenshtein_distance / len))
@@ -494,34 +476,13 @@ ggsave(
     theme_minimal()
 )
 
-ggplot(
-  data = jam_genotypes_enhancers %>%
-    group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-    filter(., maf == max(maf) & !overlap_coding),
-  aes(x = (levenshtein_distance / len))
-) +
-  geom_density(aes(col = in_genehancer), adjust = 5) +
-  theme_minimal() +
-  facet_grid(rows = vars(nchar(ru)))
-
-
 summary(
   glm(
     is_pure ~ in_genehancer + nchar(ru) + fraction_gc + len,
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., is_pure = (levenshtein_distance == 0)),
-    family = "binomial"
-  )
-)
-
-summary(
-  glm(
-    is_pure ~ elite + nchar(ru) + fraction_gc + len,
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & in_genehancer) %>%
+      slice(1L) %>%
       mutate(., is_pure = (levenshtein_distance == 0)),
     family = "binomial"
   )
@@ -532,65 +493,10 @@ summary(
     levenshtein_distance ~ elite + nchar(ru) + fraction_gc + offset(log(len)),
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
+      slice(1L) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & in_genehancer),
     family = poisson(link = "log")
   )
-)
-
-ggsave(
-  "./figures/elite_vs_nonelite_genehancer_interruption_density_20250317.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) &  !overlap_coding & (levenshtein_distance / len) < 0.25 & in_genehancer),
-    aes(x = (levenshtein_distance / len))
-  ) +
-    geom_density(aes(col = elite), adjust = 3) +
-    theme_minimal() +
-    facet_grid(rows = vars(nchar(ru)))
-)
-
-# Stratifying by elite score - very weak effect
-ggsave(
-  "./figures/purity_by_loeuf_elite_genehancers_jam_20241120.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & min_elite_loeuf != -1),
-    aes(x = min_elite_loeuf, y = (levenshtein_distance / len))
-  ) +
-    geom_point(alpha = 0.1) +
-    theme_minimal() +
-    stat_smooth() +
-    facet_grid(rows = vars(nchar(ru)), cols = vars(fraction_gc > 0))
-)
-
-## what about just stratifying by whether the STR is in an elite enhancer vs not in an enhancer
-summary(
-  glm(
-    levenshtein_distance ~ elite_enhancer + nchar(ru) + fraction_gc + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., elite_enhancer = ifelse(in_genehancer, ifelse(elite == 1, TRUE, NA), FALSE)),
-    family = poisson(link = "log")
-  )
-)
-
-ggsave(
-  "./figures/noncoding_elite_enhancers_vs_not_enhancers_by_ru_gc_112024.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., elite_enhancer = ifelse(in_genehancer, ifelse(elite == 1, TRUE, NA), FALSE),
-             contains_gc = fraction_gc > 0) %>%
-      filter(., !is.na(elite_enhancer)),
-    aes(x = (levenshtein_distance / len))
-  ) +
-    geom_density(aes(col = elite_enhancer), adjust = 5) +
-    theme_minimal() +
-    facet_grid(rows = vars(nchar(ru)), cols = vars(contains_gc))
 )
 
 # Stratifying by loeuf score
@@ -599,182 +505,21 @@ summary(
     levenshtein_distance ~ min_elite_loeuf + nchar(ru) + fraction_gc + offset(log(len)),
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
+      slice(1L) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & min_elite_loeuf != -1),
     family = poisson(link = "log")
   )
 )
 
-summary(
-  glm(
-    is_pure ~ min_elite_loeuf + nchar(ru) + fraction_gc + len,
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & min_elite_loeuf != -1) %>%
-      mutate(., is_pure = (levenshtein_distance == 0)),
-    family = "binomial"
-  )
-)
-
-# Weird - the STRs in elite enhancers linked to autosomal dominant genes are not significantly more likely to be pure
-summary(
-  glm(
-    is_pure ~ genehancer_gene_is_ad + nchar(ru) + fraction_gc + len,
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & genehancer_gene_is_ad != -1 & elite == 1) %>%
-      mutate(., is_pure = (levenshtein_distance == 0)),
-    family = "binomial"
-  )
-)
-
+# STRs in elite enhancers linked to autosomal dominant genes are not significantly more likely to be pure
 summary(
   glm(
     levenshtein_distance ~ genehancer_gene_is_ad + nchar(ru) + fraction_gc + offset(log(len)),
     data = jam_genotypes_enhancers %>%
       group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
       filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & genehancer_gene_is_ad != -1 & elite == 1) %>%
+      slice(1L) %>%
       mutate(., genehancer_gene_is_ad = as.logical(genehancer_gene_is_ad)),
-    family = poisson(link = "log")
-  )
-)
-
-ggsave(
-  "./figures/noncoding_elite_enhancers_is_gene_ad_20241120.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & genehancer_gene_is_ad != -1 & elite == 1) %>%
-      mutate(., genehancer_gene_is_ad = as.logical(genehancer_gene_is_ad)),
-    aes(x = (levenshtein_distance / len))
-  ) +
-    geom_density(aes(color = genehancer_gene_is_ad), adjust = 3) +
-    theme_minimal()
-)
-
-# Any difference between enhancers and promoter/enhancers?
-summary(
-  glm(
-    levenshtein_distance ~ element_type + nchar(ru) + fraction_gc + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, in_genehancer) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == 1 &
-               gh_element %in% c("Enhancer", "Promoter")) %>%
-      mutate(., element_type = as.factor(gh_element)),
-    family = poisson(link = "log")
-  )
-)
-
-# FIRE peaks
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_fire_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, fire) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == "1") %>%
-      mutate(., in_fire_peak = fire > 0),
-    family = poisson(link = "log")
-  )
-)
-
-jam_genotypes_enhancers %>%
-  group_by(., chrom, start, end, ru, fraction_gc, fire) %>%
-  filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == "1") %>%
-  mutate(., in_fire_peak = fire > 0) %>%
-  group_by(., in_fire_peak) %>%
-  count()
-
-# does this replicate in atac?
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_atac_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == "1") %>%
-      mutate(., in_atac_peak = k562_gm12878_atac > 0),
-    family = poisson(link = "log")
-  )
-)
-
-# IPSC chip
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_ipsc_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == "1") %>%
-      mutate(., in_ipsc_peak = ipsc_atac > 0),
-    family = poisson(link = "log")
-  )
-)
-
-# Any association with problematic regions?
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + problematic + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding & elite == "1") %>%
-      mutate(., problematic = problematic_region > 0),
-    family = poisson(link = "log")
-  )
-)
-
-# What about VISTA enhancers?
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_vista + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., in_vista = in_vista > 0),
-    family = poisson(link = "log")
-  )
-) # no effect
-
-#### FIRE peaks - accessibility
-ggsave(
-  "./figures/fire_peaks_by_purity_20250225.pdf",
-  ggplot(
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, fire) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., in_fire_peak = fire > 0),
-    aes(x = levenshtein_distance / len)
-  ) +
-    geom_density(aes(color = in_fire_peak), adjust = 5)
-)
-
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_fire_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc, fire) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., in_fire_peak = fire > 0),
-    family = poisson(link = "log")
-  )
-)
-
-# does this replicate in ATAC?
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_atac_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., in_atac_peak = k562_gm12878_atac > 0),
-    family = poisson(link = "log")
-  )
-)
-
-# what about in relevant cell type?
-summary(
-  glm(
-    levenshtein_distance ~ nchar(ru) + fraction_gc + in_atac_peak + offset(log(len)),
-    data = jam_genotypes_enhancers %>%
-      group_by(., chrom, start, end, ru, fraction_gc) %>%
-      filter(., maf == max(maf) & (levenshtein_distance / len) < 0.25 & !overlap_coding) %>%
-      mutate(., in_atac_peak = ipsc_atac > 0),
     family = poisson(link = "log")
   )
 )
